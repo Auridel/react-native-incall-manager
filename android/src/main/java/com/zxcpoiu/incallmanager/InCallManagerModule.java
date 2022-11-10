@@ -404,12 +404,12 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
 
     public void onProximitySensorChangedState(boolean isNear) {
         if (automatic && getSelectedAudioDevice() == AudioDevice.EARPIECE) {
-            if (isNear) {
-                turnScreenOff();
-            } else {
-                turnScreenOn();
-            }
-            updateAudioRoute();
+            // if (isNear) {
+            //     turnScreenOff();
+            // } else {
+            //     turnScreenOn();
+            // }
+            // updateAudioRoute();
         }
         WritableMap data = Arguments.createMap();
         data.putBoolean("isNear", isNear);
@@ -579,7 +579,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
             setMicrophoneMute(false);
             forceSpeakerOn = 0;
             hasWiredHeadset = hasWiredHeadset();
-            defaultAudioDevice = (defaultSpeakerOn) ? AudioDevice.SPEAKER_PHONE : (hasEarpiece()) ? AudioDevice.EARPIECE : AudioDevice.SPEAKER_PHONE;
+            defaultAudioDevice = hasWiredHeadset ? AudioDevice.WIRED_HEADSET : AudioDevice.SPEAKER_PHONE;
             userSelectedAudioDevice = AudioDevice.NONE;
             selectedAudioDevice = AudioDevice.NONE;
             audioDevices.clear();
@@ -613,6 +613,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
                 UiThreadUtil.runOnUiThread(() -> {
                     bluetoothManager.stop();
                 });
+                
                 restoreOriginalAudioSetup();
                 abandonAudioFocus();
                 audioManagerActivated = false;
@@ -625,7 +626,6 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
         startWiredHeadsetEvent();
         startNoisyAudioEvent();
         startMediaButtonEvent();
-        startProximitySensor(); // --- proximity event always enable, but only turn screen off when audio is routing to earpiece.
         setKeepScreenOn(true);
     }
 
@@ -1529,6 +1529,8 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
             selectAudioDevice(AudioDevice.WIRED_HEADSET);
         } else if (audioRoute.equals(AudioDevice.BLUETOOTH.name())) {
             selectAudioDevice(AudioDevice.BLUETOOTH);
+        } else if (audioRoute.equals(AudioDevice.NONE.name())) {
+            selectAudioDevice(AudioDevice.NONE);
         }
         promise.resolve(getAudioDeviceStatusMap());
     }
@@ -1745,8 +1747,8 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
     public void updateAudioDeviceState() {
         UiThreadUtil.runOnUiThread(() -> {
             Log.d(TAG, "--- updateAudioDeviceState: "
-                            + "wired headset=" + hasWiredHeadset + ", "
-                            + "BT state=" + bluetoothManager.getState());
+                        + "wired headset=" + hasWiredHeadset + ", "
+                        + "BT state=" + bluetoothManager.getState());
             Log.d(TAG, "Device status: "
                             + "available=" + audioDevices + ", "
                             + "selected=" + selectedAudioDevice + ", "
@@ -1872,9 +1874,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
     private AudioDevice getPreferredAudioDevice(boolean skipBluetooth) {
         final AudioDevice newAudioDevice;
 
-        if (userSelectedAudioDevice != null && userSelectedAudioDevice != AudioDevice.NONE) {
-            newAudioDevice = userSelectedAudioDevice;
-        } else if (!skipBluetooth && audioDevices.contains(AudioDevice.BLUETOOTH)) {
+        if (!skipBluetooth && audioDevices.contains(AudioDevice.BLUETOOTH)) {
             // If a Bluetooth is connected, then it should be used as output audio
             // device. Note that it is not sufficient that a headset is available;
             // an active SCO channel must also be up and running.
@@ -1883,6 +1883,8 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
             // If a wired headset is connected, but Bluetooth is not, then wired headset is used as
             // audio device.
             newAudioDevice = AudioDevice.WIRED_HEADSET;
+        } else if (userSelectedAudioDevice != null && userSelectedAudioDevice != AudioDevice.NONE) {
+            newAudioDevice = userSelectedAudioDevice;
         } else if (audioDevices.contains(defaultAudioDevice)) {
             newAudioDevice = defaultAudioDevice;
         } else {

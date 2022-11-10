@@ -47,13 +47,6 @@ public class InCallProximityManager {
     private InCallProximityManager(Context context, final InCallManagerModule inCallManager) {
         Log.d(TAG, "InCallProximityManager");
         checkProximitySupport(context);
-        if (proximitySupported) {
-            UiThreadUtil.runOnUiThread(() -> {
-                proximitySensor = AppRTCProximitySensor.create(context, () -> {
-                    inCallManager.onProximitySensorChangedState(proximitySensor.sensorReportsNearState());               
-                });
-            });
-        }
     }
 
     private void checkProximitySupport(Context context) {
@@ -107,16 +100,14 @@ public class InCallProximityManager {
         if (!proximitySupported) {
             return false;
         }
-        UiThreadUtil.runOnUiThread(() -> {
-            proximitySensor.start();
-        });
+
         return true;
     }
 
     public void stop() {
-        UiThreadUtil.runOnUiThread(() -> {
-            proximitySensor.stop();
-        });
+        // UiThreadUtil.runOnUiThread(() -> {
+        //     proximitySensor.stop();
+        // });
     }
 
     public boolean isProximitySupported() {
