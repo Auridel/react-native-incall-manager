@@ -59,6 +59,15 @@ class InCallManager {
       console.log("ios doesn't support requestAudioFocus()");
     }
   }
+
+  //ios only
+  forceUpdateAudioRoute() {
+    if (Platform.OS === "ios") {
+      _InCallManager.forceUpdateAudioRoute();
+    } else {
+      console.log("ios doesn't support forceUpdateAudioRoute()");
+    }
+  }
 }
 
 export default new InCallManager();
