@@ -112,7 +112,7 @@ RCT_EXPORT_METHOD(start:(NSString *)mediaType
     _forceSpeakerOn = 0;
     [self startAudioSessionNotification];
     [self audioSessionSetCategory:_incallAudioCategory
-                          options:0
+                          options:(AVAudioSessionCategoryOptionAllowBluetooth | AVAudioSessionCategoryOptionDefaultToSpeaker)
                        callerMemo:NSStringFromSelector(_cmd)];
     [self audioSessionSetMode:_incallAudioMode
                    callerMemo:NSStringFromSelector(_cmd)];
@@ -210,10 +210,21 @@ RCT_EXPORT_METHOD(getIsWiredHeadsetPluggedIn:(RCTPromiseResolveBlock)resolve
     resolve(wiredHeadsetPluggedIn ? @YES : @NO);
 }
 
+RCT_EXPORT_METHOD(forceUpdateAudioRoute)
+{
+    [self updateAudioRoute];
+}
+
 - (void)updateAudioRoute
 {
     NSLog(@"RNInCallManager.updateAudioRoute(): [Enter] forceSpeakerOn flag=%d media=%@ category=%@ mode=%@", _forceSpeakerOn, _media, _audioSession.category, _audioSession.mode);
     //self.debugAudioSession()
+    
+    NSLog(@"RNInCallManager current CATEGORY %@", _audioSession.category);
+    NSLog(@"RNInCallManager current MODE %@", _audioSession.mode);
+    NSLog(@"RNInCallManager current OUT %@", _audioSession.outputDataSource);
+    NSLog(@"RNInCallManager current OUT VOLUME %f", _audioSession.outputVolume);
+    NSLog(@"RNInCallManager =====> current route: %@ ", _audioSession.currentRoute);
 
     //AVAudioSessionPortOverride overrideAudioPort;
     int overrideAudioPort;
@@ -249,6 +260,7 @@ RCT_EXPORT_METHOD(getIsWiredHeadsetPluggedIn:(RCTPromiseResolveBlock)resolve
     BOOL isCurrentRouteToSpeaker;
     isCurrentRouteToSpeaker = [self checkAudioRoute:@[AVAudioSessionPortBuiltInSpeaker]
                                                routeType:@"output"];
+    NSLog(@"RNInCallManager.updateAudioRoute(): IS CURRENT TO SPEAKER: (%d)", isCurrentRouteToSpeaker);
     if ((overrideAudioPort == AVAudioSessionPortOverrideSpeaker && !isCurrentRouteToSpeaker)
             || (overrideAudioPort == AVAudioSessionPortOverrideNone && isCurrentRouteToSpeaker)) {
         @try {
@@ -263,7 +275,7 @@ RCT_EXPORT_METHOD(getIsWiredHeadsetPluggedIn:(RCTPromiseResolveBlock)resolve
 
     if (![_audioSession.category isEqualToString:_incallAudioCategory]) {
         [self audioSessionSetCategory:_incallAudioCategory
-                              options:0
+                              options:(AVAudioSessionCategoryOptionAllowBluetooth | AVAudioSessionCategoryOptionDefaultToSpeaker)
                            callerMemo:NSStringFromSelector(_cmd)];
         NSLog(@"RNInCallManager.updateAudioRoute() audio category has changed to %@", _incallAudioCategory);
     } else {
