@@ -20,22 +20,8 @@
     UIDevice *_currentDevice;
 
     AVAudioSession *_audioSession;
-    AVAudioPlayer *_ringtone;
-    AVAudioPlayer *_ringback;
-    AVAudioPlayer *_busytone;
-
-    NSURL *_defaultRingtoneUri;
-    NSURL *_defaultRingbackUri;
-    NSURL *_defaultBusytoneUri;
-    NSURL *_bundleRingtoneUri;
-    NSURL *_bundleRingbackUri;
-    NSURL *_bundleBusytoneUri;
-
-    //BOOL isProximitySupported;
-    BOOL _proximityIsNear;
 
     // --- tags to indicating which observer has added
-    BOOL _isProximityRegistered;
     BOOL _isAudioSessionInterruptionRegistered;
     BOOL _isAudioSessionRouteChangeRegistered;
     BOOL _isAudioSessionMediaServicesWereLostRegistered;
@@ -43,7 +29,6 @@
     BOOL _isAudioSessionSilenceSecondaryAudioHintRegistered;
 
     // -- notification observers
-    id _proximityObserver;
     id _audioSessionInterruptionObserver;
     id _audioSessionRouteChangeObserver;
     id _audioSessionMediaServicesWereLostObserver;
@@ -71,27 +56,13 @@ RCT_EXPORT_MODULE(InCallManager)
     if (self = [super init]) {
         _currentDevice = [UIDevice currentDevice];
         _audioSession = [AVAudioSession sharedInstance];
-        _ringtone = nil;
-        _ringback = nil;
-        _busytone = nil;
 
-        _defaultRingtoneUri = nil;
-        _defaultRingbackUri = nil;
-        _defaultBusytoneUri = nil;
-        _bundleRingtoneUri = nil;
-        _bundleRingbackUri = nil;
-        _bundleBusytoneUri = nil;
-
-        _proximityIsNear = NO;
-
-        _isProximityRegistered = NO;
         _isAudioSessionInterruptionRegistered = NO;
         _isAudioSessionRouteChangeRegistered = NO;
         _isAudioSessionMediaServicesWereLostRegistered = NO;
         _isAudioSessionMediaServicesWereResetRegistered = NO;
         _isAudioSessionSilenceSecondaryAudioHintRegistered = NO;
 
-        _proximityObserver = nil;
         _audioSessionInterruptionObserver = nil;
         _audioSessionRouteChangeObserver = nil;
         _audioSessionMediaServicesWereLostObserver = nil;
@@ -114,18 +85,16 @@ RCT_EXPORT_MODULE(InCallManager)
 - (void)dealloc
 {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
-    [self stop:@""];
+    [self stop];
 }
 
 - (NSArray<NSString *> *)supportedEvents
 {
-    return @[@"Proximity",
-             @"WiredHeadset"];
+    return @[@"WiredHeadset", @"BluetoothDevice"];
 }
 
 RCT_EXPORT_METHOD(start:(NSString *)mediaType
-                   auto:(BOOL)_auto
-        ringbackUriType:(NSString *)ringbackUriType)
+                   auto:(BOOL)_auto)
 {
     if (_audioSessionInitialized) {
         return;
@@ -151,73 +120,27 @@ RCT_EXPORT_METHOD(start:(NSString *)mediaType
                         options:0
                      callerMemo:NSStringFromSelector(_cmd)];
 
-    if (ringbackUriType.length > 0) {
-        NSLog(@"RNInCallManager.start() play ringback first. type=%@", ringbackUriType);
-        [self startRingback:ringbackUriType];
-    }
-
     [self setKeepScreenOn:YES];
     _audioSessionInitialized = YES;
     //self.debugAudioSession()
 }
 
-RCT_EXPORT_METHOD(stop:(NSString *)busytoneUriType)
+RCT_EXPORT_METHOD(stop)
 {
     if (!_audioSessionInitialized) {
         return;
     }
 
-    [self stopRingback];
-
-    if (busytoneUriType.length > 0 && [self startBusytone:busytoneUriType]) {
-        // play busytone first, and call this func again when finish
-        NSLog(@"RNInCallManager.stop(): play busytone before stop");
-        return;
-    } else {
-        NSLog(@"RNInCallManager.stop(): stop InCallManager");
-        [self restoreOriginalAudioSetup];
-        [self stopBusytone];
-        [self stopProximitySensor];
-        [self audioSessionSetActive:NO
-                            options:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
-                         callerMemo:NSStringFromSelector(_cmd)];
-        [self setKeepScreenOn:NO];
-        [self stopAudioSessionNotification];
-        [[NSNotificationCenter defaultCenter] removeObserver:self];
-        _forceSpeakerOn = 0;
-        _audioSessionInitialized = NO;
-    }
-}
-
-RCT_EXPORT_METHOD(turnScreenOn)
-{
-    NSLog(@"RNInCallManager.turnScreenOn(): ios doesn't support turnScreenOn()");
-}
-
-RCT_EXPORT_METHOD(turnScreenOff)
-{
-    NSLog(@"RNInCallManager.turnScreenOff(): ios doesn't support turnScreenOff()");
-}
-
-RCT_EXPORT_METHOD(setFlashOn:(BOOL)enable
-                  brightness:(nonnull NSNumber *)brightness)
-{
-    if ([AVCaptureDevice class]) {
-        AVCaptureDevice *device = [AVCaptureDevice defaultDeviceWithMediaType:AVMediaTypeVideo];
-        if (device.hasTorch && device.position == AVCaptureDevicePositionBack) {
-            @try {
-                [device lockForConfiguration:nil];
-
-                if (enable) {
-                    [device setTorchMode:AVCaptureTorchModeOn];
-                } else {
-                    [device setTorchMode:AVCaptureTorchModeOff];
-                }
-
-                [device unlockForConfiguration];
-            } @catch (NSException *e) {}
-        }
-    }
+    NSLog(@"RNInCallManager.stop(): stop InCallManager");
+    [self restoreOriginalAudioSetup];
+    [self audioSessionSetActive:NO
+                        options:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
+                     callerMemo:NSStringFromSelector(_cmd)];
+    [self setKeepScreenOn:NO];
+    [self stopAudioSessionNotification];
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    _forceSpeakerOn = 0;
+    _audioSessionInitialized = NO;
 }
 
 RCT_EXPORT_METHOD(setKeepScreenOn:(BOOL)enable)
@@ -280,153 +203,6 @@ RCT_EXPORT_METHOD(setForceSpeakerphoneOn:(int)flag)
     [self updateAudioRoute];
 }
 
-RCT_EXPORT_METHOD(setMicrophoneMute:(BOOL)enable)
-{
-    NSLog(@"RNInCallManager.setMicrophoneMute(): ios doesn't support setMicrophoneMute()");
-}
-
-RCT_EXPORT_METHOD(startRingback:(NSString *)_ringbackUriType)
-{
-    // you may rejected by apple when publish app if you use system sound instead of bundled sound.
-    NSLog(@"RNInCallManager.startRingback(): type=%@", _ringbackUriType);
-
-    @try {
-        if (_ringback != nil) {
-            if ([_ringback isPlaying]) {
-                NSLog(@"RNInCallManager.startRingback(): is already playing");
-                return;
-            } else {
-                [self stopRingback];
-            }
-        }
-        // ios don't have embedded DTMF tone generator. use system dtmf sound files.
-        NSString *ringbackUriType = [_ringbackUriType isEqualToString:@"_DTMF_"]
-            ? @"_DEFAULT_"
-            : _ringbackUriType;
-        NSURL *ringbackUri = [self getRingbackUri:ringbackUriType];
-        if (ringbackUri == nil) {
-            NSLog(@"RNInCallManager.startRingback(): no available media");
-            return;
-        }
-        //self.storeOriginalAudioSetup()
-        _ringback = [[AVAudioPlayer alloc] initWithContentsOfURL:ringbackUri error:nil];
-        _ringback.delegate = self;
-        _ringback.numberOfLoops = -1; // you need to stop it explicitly
-        [_ringback prepareToPlay];
-
-        //self.audioSessionSetCategory(self.incallAudioCategory, [.DefaultToSpeaker, .AllowBluetooth], #function)
-        [self audioSessionSetCategory:_incallAudioCategory
-                              options:0
-                           callerMemo:NSStringFromSelector(_cmd)];
-        [self audioSessionSetMode:_incallAudioMode
-                       callerMemo:NSStringFromSelector(_cmd)];
-        [_ringback play];
-    } @catch (NSException *e) {
-        NSLog(@"RNInCallManager.startRingback(): caught error=%@", e.reason);
-    }
-}
-
-RCT_EXPORT_METHOD(stopRingback)
-{
-    if (_ringback != nil) {
-        NSLog(@"RNInCallManager.stopRingback()");
-        [_ringback stop];
-        _ringback = nil;
-        // --- need to reset route based on config because WebRTC seems will switch audio mode automatically when call established.
-        //[self updateAudioRoute];
-    }
-}
-
-RCT_EXPORT_METHOD(startRingtone:(NSString *)ringtoneUriType
-               ringtoneCategory:(NSString *)ringtoneCategory)
-{
-    // you may rejected by apple when publish app if you use system sound instead of bundled sound.
-    NSLog(@"RNInCallManager.startRingtone(): type: %@", ringtoneUriType);
-    @try {
-        if (_ringtone != nil) {
-            if ([_ringtone isPlaying]) {
-                NSLog(@"RNInCallManager.startRingtone(): is already playing.");
-                return;
-            } else {
-                [self stopRingtone];
-            }
-        }
-        NSURL *ringtoneUri = [self getRingtoneUri:ringtoneUriType];
-        if (ringtoneUri == nil) {
-            NSLog(@"RNInCallManager.startRingtone(): no available media");
-            return;
-        }
-
-        // --- ios has Ringer/Silent switch, so just play without check ringer volume.
-        [self storeOriginalAudioSetup];
-        _ringtone = [[AVAudioPlayer alloc] initWithContentsOfURL:ringtoneUri error:nil];
-        _ringtone.delegate = self;
-        _ringtone.numberOfLoops = -1; // you need to stop it explicitly
-        [_ringtone prepareToPlay];
-
-        // --- 1. if we use Playback, it can supports background playing (starting from foreground), but it would not obey Ring/Silent switch.
-        // ---    make sure you have enabled 'audio' tag ( or 'voip' tag ) at XCode -> Capabilities -> BackgroundMode
-        // --- 2. if we use SoloAmbient, it would obey Ring/Silent switch in the foreground, but does not support background playing,
-        // ---    thus, then you should play ringtone again via local notification after back to home during a ring session.
-
-        // we prefer 2. by default, since most of users doesn't want to interrupted by a ringtone if Silent mode is on.
-
-        //self.audioSessionSetCategory(AVAudioSessionCategoryPlayback, [.DuckOthers], #function)
-        if ([ringtoneCategory isEqualToString:@"playback"]) {
-            [self audioSessionSetCategory:AVAudioSessionCategoryPlayback
-                                  options:0
-                               callerMemo:NSStringFromSelector(_cmd)];
-        } else {
-            [self audioSessionSetCategory:AVAudioSessionCategorySoloAmbient
-                                  options:0
-                               callerMemo:NSStringFromSelector(_cmd)];
-        }
-        [self audioSessionSetMode:AVAudioSessionModeDefault
-                       callerMemo:NSStringFromSelector(_cmd)];
-        //[self audioSessionSetActive:YES
-        //                    options:nil
-        //                 callerMemo:NSStringFromSelector(_cmd)];
-        [_ringtone play];
-    } @catch (NSException *e) {
-        NSLog(@"RNInCallManager.startRingtone(): caught error = %@", e.reason);
-    }
-}
-
-RCT_EXPORT_METHOD(stopRingtone)
-{
-    if (_ringtone != nil) {
-        NSLog(@"RNInCallManager.stopRingtone()");
-        [_ringtone stop];
-        _ringtone = nil;
-        [self restoreOriginalAudioSetup];
-        [self audioSessionSetActive:NO
-                            options:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
-                         callerMemo:NSStringFromSelector(_cmd)];
-    }
-}
-
-RCT_EXPORT_METHOD(getAudioUriJS:(NSString *)audioType
-                       fileType:(NSString *)fileType
-                        resolve:(RCTPromiseResolveBlock)resolve
-                         reject:(RCTPromiseRejectBlock)reject)
-{
-    NSURL *result = nil;
-    if ([audioType isEqualToString:@"ringback"]) {
-        result = [self getRingbackUri:fileType];
-    } else if ([audioType isEqualToString:@"busytone"]) {
-        result = [self getBusytoneUri:fileType];
-    } else if ([audioType isEqualToString:@"ringtone"]) {
-        result = [self getRingtoneUri:fileType];
-    }
-    if (result != nil) {
-        if (result.absoluteString.length > 0) {
-            resolve(result.absoluteString);
-            return;
-        }
-    }
-    reject(@"error_code", @"getAudioUriJS() failed", RCTErrorWithMessage(@"getAudioUriJS() failed"));
-}
-
 RCT_EXPORT_METHOD(getIsWiredHeadsetPluggedIn:(RCTPromiseResolveBlock)resolve
                                       reject:(RCTPromiseRejectBlock)reject)
 {
@@ -447,14 +223,13 @@ RCT_EXPORT_METHOD(getIsWiredHeadsetPluggedIn:(RCTPromiseResolveBlock)resolve
     // --- WebRTC native code will change audio mode automatically when established.
     // --- It would have some race condition if we change audio mode with webrtc at the same time.
     // --- So we should not change audio mode as possible as we can. Only when default video call which wants to force speaker off.
-    // --- audio: only override speaker on/off; video: should change category if needed and handle proximity sensor. ( because default proximity is off when video call )
+    // --- audio: only override speaker on/off; video: should change category
     if (_forceSpeakerOn == 1) {
         // --- force ON, override speaker only, keep audio mode remain.
         overrideAudioPort = AVAudioSessionPortOverrideSpeaker;
         overrideAudioPortString = @".Speaker";
         if ([_media isEqualToString:@"video"]) {
             audioMode = AVAudioSessionModeVideoChat;
-            [self stopProximitySensor];
         }
     } else if (_forceSpeakerOn == -1) {
         // --- force off
@@ -462,14 +237,12 @@ RCT_EXPORT_METHOD(getIsWiredHeadsetPluggedIn:(RCTPromiseResolveBlock)resolve
         overrideAudioPortString = @".None";
         if ([_media isEqualToString:@"video"]) {
             audioMode = AVAudioSessionModeVideoChat;
-            [self startProximitySensor];
         }
     } else { // use default behavior
         overrideAudioPort = AVAudioSessionPortOverrideNone;
         overrideAudioPortString = @".None";
         if ([_media isEqualToString:@"video"]) {
             audioMode = AVAudioSessionModeVideoChat;
-            [self stopProximitySensor];
         }
     }
 
@@ -523,58 +296,6 @@ RCT_EXPORT_METHOD(getIsWiredHeadsetPluggedIn:(RCTPromiseResolveBlock)resolve
         }
     }
     return NO;
-}
-
-- (BOOL)startBusytone:(NSString *)_busytoneUriType
-{
-    // you may rejected by apple when publish app if you use system sound instead of bundled sound.
-    NSLog(@"RNInCallManager.startBusytone(): type: %@", _busytoneUriType);
-    @try {
-        if (_busytone != nil) {
-            if ([_busytone isPlaying]) {
-                NSLog(@"RNInCallManager.startBusytone(): is already playing");
-                return NO;
-            } else {
-                [self stopBusytone];
-            }
-        }
-
-        // ios don't have embedded DTMF tone generator. use system dtmf sound files.
-        NSString *busytoneUriType = [_busytoneUriType isEqualToString:@"_DTMF_"]
-            ? @"_DEFAULT_"
-            : _busytoneUriType;
-        NSURL *busytoneUri = [self getBusytoneUri:busytoneUriType];
-        if (busytoneUri == nil) {
-            NSLog(@"RNInCallManager.startBusytone(): no available media");
-            return NO;
-        }
-        //[self storeOriginalAudioSetup];
-        _busytone = [[AVAudioPlayer alloc] initWithContentsOfURL:busytoneUri error:nil];
-        _busytone.delegate = self;
-        _busytone.numberOfLoops = 0; // it's part of start(), will stop at stop()
-        [_busytone prepareToPlay];
-
-        //self.audioSessionSetCategory(self.incallAudioCategory, [.DefaultToSpeaker, .AllowBluetooth], #function)
-        [self audioSessionSetCategory:_incallAudioCategory
-                              options:0
-                           callerMemo:NSStringFromSelector(_cmd)];
-        [self audioSessionSetMode:_incallAudioMode
-                       callerMemo:NSStringFromSelector(_cmd)];
-        [_busytone play];
-    } @catch (NSException *e) {
-        NSLog(@"RNInCallManager.startBusytone(): caught error = %@", e.reason);
-        return NO;
-    }
-    return YES;
-}
-
-- (void)stopBusytone
-{
-    if (_busytone != nil) {
-        NSLog(@"RNInCallManager.stopBusytone()");
-        [_busytone stop];
-        _busytone = nil;
-    }
 }
 
 - (BOOL)isWiredHeadsetPluggedIn
@@ -650,56 +371,6 @@ RCT_EXPORT_METHOD(getIsWiredHeadsetPluggedIn:(RCTPromiseResolveBlock)resolve
                        callerMemo:NSStringFromSelector(_cmd)];
     [self audioSessionSetMode:_origAudioMode
                    callerMemo:NSStringFromSelector(_cmd)];
-}
-
-RCT_EXPORT_METHOD(startProximitySensor)
-{
-    if (_isProximityRegistered) {
-        return;
-    }
-
-    NSLog(@"RNInCallManager.startProximitySensor()");
-    dispatch_async(dispatch_get_main_queue(), ^{
-        self->_currentDevice.proximityMonitoringEnabled = YES;
-    });
-
-    // --- in case it didn't deallocate when ViewDidUnload
-    [self stopObserve:_proximityObserver
-                 name:UIDeviceProximityStateDidChangeNotification
-               object:nil];
-
-    _proximityObserver = [self startObserve:UIDeviceProximityStateDidChangeNotification
-                                     object:_currentDevice
-                                      queue: nil
-                                      block:^(NSNotification *notification) {
-        BOOL state = self->_currentDevice.proximityState;
-        if (state != self->_proximityIsNear) {
-            NSLog(@"RNInCallManager.UIDeviceProximityStateDidChangeNotification(): isNear: %@", state ? @"YES" : @"NO");
-            self->_proximityIsNear = state;
-            [self sendEventWithName:@"Proximity" body:@{@"isNear": state ? @YES : @NO}];
-        }
-    }];
-
-    _isProximityRegistered = YES;
-}
-
-RCT_EXPORT_METHOD(stopProximitySensor)
-{
-    if (!_isProximityRegistered) {
-        return;
-    }
-
-    NSLog(@"RNInCallManager.stopProximitySensor()");
-    dispatch_async(dispatch_get_main_queue(), ^{
-        self->_currentDevice.proximityMonitoringEnabled = NO;
-    });
-
-    // --- remove all no matter what object
-    [self stopObserve:_proximityObserver
-                 name:UIDeviceProximityStateDidChangeNotification
-               object:nil];
-
-    _isProximityRegistered = NO;
 }
 
 - (void)startAudioSessionNotification
@@ -818,6 +489,12 @@ RCT_EXPORT_METHOD(stopProximitySensor)
                                                @"hasMic": @NO,
                                                @"deviceName": AVAudioSessionPortHeadphones,
                                            }];
+                    } else if ([self checkAudioRoute:@[AVAudioSessionPortBluetoothLE, AVAudioSessionPortBluetoothHFP, AVAudioSessionPortBluetoothA2DP] routeType:@"output"]) {
+                        [self sendEventWithName:@"BluetoothDevice"
+                                           body:@{
+                            @"isConnected": @YES,
+                            @"deviceType": @"BLUETOOTH"
+                        }];
                     }
                     break;
                 case AVAudioSessionRouteChangeReasonOldDeviceUnavailable:
@@ -829,6 +506,11 @@ RCT_EXPORT_METHOD(stopProximitySensor)
                                                @"hasMic": @NO,
                                                @"deviceName": @"",
                                            }];
+                    } else if ([self checkAudioRoute:@[AVAudioSessionPortBluetoothLE, AVAudioSessionPortBluetoothHFP, AVAudioSessionPortBluetoothA2DP] routeType:@"output"]) {
+                        [self sendEventWithName:@"BluetoothDevice" body:@{
+                            @"isConnected": @NO,
+                            @"deviceType": @"BLUETOOTH"
+                        }];
                     }
                     break;
                 case AVAudioSessionRouteChangeReasonCategoryChange:
@@ -1036,93 +718,6 @@ RCT_EXPORT_METHOD(stopProximitySensor)
                                                   object:object];
 }
 
-- (NSURL *)getRingbackUri:(NSString *)_type
-{
-    NSString *fileBundle = @"incallmanager_ringback";
-    NSString *fileBundleExt = @"mp3";
-    //NSString *fileSysWithExt = @"vc~ringing.caf"; // --- ringtone of facetime, but can't play it.
-    //NSString *fileSysPath = @"/System/Library/Audio/UISounds";
-    NSString *fileSysWithExt = @"Marimba.m4r";
-    NSString *fileSysPath = @"/Library/Ringtones";
-
-    // --- you can't get default user perfrence sound in ios
-    NSString *type = [_type isEqualToString:@""] || [_type isEqualToString:@"_DEFAULT_"]
-        ? fileSysWithExt
-        : _type;
-
-    NSURL *bundleUri = _bundleRingbackUri;
-    NSURL *defaultUri = _defaultRingbackUri;
-
-    NSURL *uri = [self getAudioUri:type
-                        fileBundle:fileBundle
-                     fileBundleExt:fileBundleExt
-                    fileSysWithExt:fileSysWithExt
-                       fileSysPath:fileSysPath
-                         uriBundle:&bundleUri
-                        uriDefault:&defaultUri];
-
-    _bundleRingbackUri = bundleUri;
-    _defaultRingbackUri = defaultUri;
-
-    return uri;
-}
-
-- (NSURL *)getBusytoneUri:(NSString *)_type
-{
-    NSString *fileBundle = @"incallmanager_busytone";
-    NSString *fileBundleExt = @"mp3";
-    NSString *fileSysWithExt = @"ct-busy.caf"; //ct-congestion.caf
-    NSString *fileSysPath = @"/System/Library/Audio/UISounds";
-    // --- you can't get default user perfrence sound in ios
-    NSString *type = [_type isEqualToString:@""] || [_type isEqualToString:@"_DEFAULT_"]
-        ? fileSysWithExt
-        : _type;
-
-    NSURL *bundleUri = _bundleBusytoneUri;
-    NSURL *defaultUri = _defaultBusytoneUri;
-
-    NSURL *uri = [self getAudioUri:type
-                        fileBundle:fileBundle
-                     fileBundleExt:fileBundleExt
-                    fileSysWithExt:fileSysWithExt
-                       fileSysPath:fileSysPath
-                         uriBundle:&bundleUri
-                        uriDefault:&defaultUri];
-
-    _bundleBusytoneUri = bundleUri;
-    _defaultBusytoneUri = defaultUri;
-
-    return uri;
-}
-
-- (NSURL *)getRingtoneUri:(NSString *)_type
-{
-    NSString *fileBundle = @"incallmanager_ringtone";
-    NSString *fileBundleExt = @"mp3";
-    NSString *fileSysWithExt = @"Opening.m4r"; //Marimba.m4r
-    NSString *fileSysPath = @"/Library/Ringtones";
-    // --- you can't get default user perfrence sound in ios
-    NSString *type = [_type isEqualToString:@""] || [_type isEqualToString:@"_DEFAULT_"]
-        ? fileSysWithExt
-        : _type;
-
-    NSURL *bundleUri = _bundleRingtoneUri;
-    NSURL *defaultUri = _defaultRingtoneUri;
-
-    NSURL *uri = [self getAudioUri:type
-                        fileBundle:fileBundle
-                     fileBundleExt:fileBundleExt
-                    fileSysWithExt:fileSysWithExt
-                       fileSysPath:fileSysPath
-                         uriBundle:&bundleUri
-                        uriDefault:&defaultUri];
-
-    _bundleRingtoneUri = bundleUri;
-    _defaultRingtoneUri = defaultUri;
-
-    return uri;
-}
-
 - (NSURL *)getAudioUri:(NSString *)_type
             fileBundle:(NSString *)fileBundle
          fileBundleExt:(NSString *)fileBundleExt
@@ -1172,110 +767,5 @@ RCT_EXPORT_METHOD(stopProximitySensor)
     NSLog(@"RNInCallManager.getSysFileUri(): can not get url for %@", target);
     return nil;
 }
-
-#pragma mark - AVAudioPlayerDelegate
-
-// --- this only called when all loop played. it means, an infinite (numberOfLoops = -1) loop will never into here.
-- (void)audioPlayerDidFinishPlaying:(AVAudioPlayer *)player
-                       successfully:(BOOL)flag
-{
-    NSString *filename = player.url.URLByDeletingPathExtension.lastPathComponent;
-    NSLog(@"RNInCallManager.audioPlayerDidFinishPlaying(): finished playing: %@", filename);
-    if ([filename isEqualToString:_bundleBusytoneUri.URLByDeletingPathExtension.lastPathComponent]
-            || [filename isEqualToString:_defaultBusytoneUri.URLByDeletingPathExtension.lastPathComponent]) {
-        //[self stopBusytone];
-        NSLog(@"RNInCallManager.audioPlayerDidFinishPlaying(): busytone finished, invoke stop()");
-        [self stop:@""];
-    }
-}
-
-- (void)audioPlayerDecodeErrorDidOccur:(AVAudioPlayer *)player
-                                 error:(NSError *)error
-{
-    NSString *filename = player.url.URLByDeletingPathExtension.lastPathComponent;
-    NSLog(@"RNInCallManager.audioPlayerDecodeErrorDidOccur(): player=%@, error=%@", filename, error.localizedDescription);
-}
-
-// --- Deprecated in iOS 8.0.
-//- (void)audioPlayerBeginInterruption:(AVAudioPlayer *)player
-//{
-//}
-
-// --- Deprecated in iOS 8.0.
-//- (void)audioPlayerEndInterruption:(AVAudioPlayer *)player
-//{
-//}
-
-//- (void)debugAudioSession
-//{
-//    let currentRoute: Dictionary <String,String> = ["input": self.audioSession.currentRoute.inputs[0].uid, "output": self.audioSession.currentRoute.outputs[0].uid]
-//    var categoryOptions = ""
-//    switch self.audioSession.categoryOptions {
-//        case AVAudioSessionCategoryOptions.mixWithOthers:
-//            categoryOptions = "MixWithOthers"
-//        case AVAudioSessionCategoryOptions.duckOthers:
-//            categoryOptions = "DuckOthers"
-//        case AVAudioSessionCategoryOptions.allowBluetooth:
-//            categoryOptions = "AllowBluetooth"
-//        case AVAudioSessionCategoryOptions.defaultToSpeaker:
-//            categoryOptions = "DefaultToSpeaker"
-//        default:
-//            categoryOptions = "unknow"
-//    }
-//    if #available(iOS 9, *) {
-//        if categoryOptions == "unknow" && self.audioSession.categoryOptions == AVAudioSessionCategoryOptions.interruptSpokenAudioAndMixWithOthers {
-//            categoryOptions = "InterruptSpokenAudioAndMixWithOthers"
-//        }
-//    }
-//    self._checkRecordPermission()
-//    let audioSessionProperties: Dictionary <String,Any> = [
-//        "category": self.audioSession.category,
-//        "categoryOptions": categoryOptions,
-//        "mode": self.audioSession.mode,
-//        //"inputAvailable": self.audioSession.inputAvailable,
-//        "otherAudioPlaying": self.audioSession.isOtherAudioPlaying,
-//        "recordPermission" : self.recordPermission,
-//        //"availableInputs": self.audioSession.availableInputs,
-//        //"preferredInput": self.audioSession.preferredInput,
-//        //"inputDataSources": self.audioSession.inputDataSources,
-//        //"inputDataSource": self.audioSession.inputDataSource,
-//        //"outputDataSources": self.audioSession.outputDataSources,
-//        //"outputDataSource": self.audioSession.outputDataSource,
-//        "currentRoute": currentRoute,
-//        "outputVolume": self.audioSession.outputVolume,
-//        "inputGain": self.audioSession.inputGain,
-//        "inputGainSettable": self.audioSession.isInputGainSettable,
-//        "inputLatency": self.audioSession.inputLatency,
-//        "outputLatency": self.audioSession.outputLatency,
-//        "sampleRate": self.audioSession.sampleRate,
-//        "preferredSampleRate": self.audioSession.preferredSampleRate,
-//        "IOBufferDuration": self.audioSession.ioBufferDuration,
-//        "preferredIOBufferDuration": self.audioSession.preferredIOBufferDuration,
-//        "inputNumberOfChannels": self.audioSession.inputNumberOfChannels,
-//        "maximumInputNumberOfChannels": self.audioSession.maximumInputNumberOfChannels,
-//        "preferredInputNumberOfChannels": self.audioSession.preferredInputNumberOfChannels,
-//        "outputNumberOfChannels": self.audioSession.outputNumberOfChannels,
-//        "maximumOutputNumberOfChannels": self.audioSession.maximumOutputNumberOfChannels,
-//        "preferredOutputNumberOfChannels": self.audioSession.preferredOutputNumberOfChannels
-//    ]
-//    /*
-//    // --- Too noisy
-//    if #available(iOS 8, *) {
-//        //audioSessionProperties["secondaryAudioShouldBeSilencedHint"] = self.audioSession.secondaryAudioShouldBeSilencedHint
-//    } else {
-//        //audioSessionProperties["secondaryAudioShouldBeSilencedHint"] = "unknow"
-//    }
-//    if #available(iOS 9, *) {
-//        //audioSessionProperties["availableCategories"] = self.audioSession.availableCategories
-//        //audioSessionProperties["availableModes"] = self.audioSession.availableModes
-//    }
-//    */
-//    NSLog("RNInCallManager.debugAudioSession(): ==========BEGIN==========")
-//    // iterate over all keys
-//    for (key, value) in audioSessionProperties {
-//        NSLog("\(key) = \(value)")
-//    }
-//    NSLog("RNInCallManager.debugAudioSession(): ==========END==========")
-//}
 
 @end
